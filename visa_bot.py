@@ -110,12 +110,44 @@ def login(driver):
 
 def go_to_appointment_page(driver):
     """
-    Navigate to the appointment scheduling page.
+    Navigate step-by-step to the appointment rescheduling section.
     """
-    print("[INFO] Navigating to appointment page...")
-    driver.get(
-        "https://ais.usvisa-info.com/es-cr/niv/schedule/67362465/appointment?confirmed_limit_message=1&commit=Continue"
+    print("[INFO] Clicking 'Continue' after login...")
+    WebDriverWait(driver, 20).until(
+        EC.element_to_be_clickable((By.LINK_TEXT, "Continuar"))
+    ).click()
+
+    print("[INFO] Locating 'Reprogramar cita' accordion item...")
+    accordion_title = WebDriverWait(driver, 20).until(
+        EC.presence_of_element_located((By.XPATH, "//h5[contains(., 'Reprogramar cita')]/ancestor::a"))
     )
+
+    parent_li = accordion_title.find_element(By.XPATH, "./ancestor::li")
+
+    if "is-active" not in parent_li.get_attribute("class"):
+        print("[INFO] Expanding accordion section...")
+        driver.execute_script("arguments[0].click();", accordion_title)
+
+    print("[INFO] Clicking green 'Reprogramar cita' button...")
+    reprogramar_btn = WebDriverWait(driver, 10).until(
+        EC.element_to_be_clickable((By.XPATH, "//a[contains(@class, 'button') and contains(., 'Reprogramar cita')]"))
+    )
+    driver.execute_script("arguments[0].scrollIntoView(true);", reprogramar_btn)
+    reprogramar_btn.click()
+
+    print("[INFO] Accepting 'Yo entiendo' checkbox by clicking the label...")
+    label = WebDriverWait(driver, 10).until(
+        EC.element_to_be_clickable((By.CSS_SELECTOR, "label[for='confirmed_limit_message']"))
+    )
+    driver.execute_script("arguments[0].click();", label)
+
+    print("[INFO] Clicking 'Continue' button...")
+    continue_btn = WebDriverWait(driver, 10).until(
+        EC.element_to_be_clickable((By.NAME, "commit"))
+    )
+    driver.execute_script("arguments[0].click();", continue_btn)
+
+    print("[INFO] Reached appointment calendar page.")
 
 
 def check_for_appointments(driver):
