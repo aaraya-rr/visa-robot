@@ -9,6 +9,7 @@ from datetime import datetime
 import time
 import subprocess
 import configparser
+import calendar
 
 # Load credentials from config.ini
 config = configparser.ConfigParser()
@@ -149,6 +150,13 @@ def go_to_appointment_page(driver):
 
     print("[INFO] Reached appointment calendar page.")
 
+def build_max_date(year, month, day):
+    """
+    Build a valid max date even if the config day exceeds the month's length.
+    """
+    _, last_day = calendar.monthrange(year, month)
+    safe_day = min(day, last_day)
+    return datetime(year, month, safe_day)
 
 def check_for_appointments(driver):
     """
@@ -158,17 +166,14 @@ def check_for_appointments(driver):
 
     while calendar_attempts < MAX_CALENDAR_ATTEMPTS:
         try:
-            print(
-                f"[INFO] Attempting to open calendar (attempt {calendar_attempts + 1})...")
+            print(f"[INFO] Attempting to open calendar (attempt {calendar_attempts + 1})...")
             field = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable(
-                    (By.ID, "appointments_consulate_appointment_date"))
+                EC.element_to_be_clickable((By.ID, "appointments_consulate_appointment_date"))
             )
             field.click()
 
             WebDriverWait(driver, 10).until(
-                EC.presence_of_all_elements_located(
-                    (By.CLASS_NAME, "ui-datepicker-title"))
+                EC.presence_of_all_elements_located((By.CLASS_NAME, "ui-datepicker-title"))
             )
             break
         except:
@@ -178,41 +183,84 @@ def check_for_appointments(driver):
             calendar_attempts += 1
     else:
         print("[ERROR] All attempts failed. Restarting session...")
-        return False  # Indicates login should be restarted
+        return False
+
+    max_date = build_max_date(MAX_YEAR, MAX_MONTH, MAX_DAY)
+    print(f"[INFO] Max allowed date: {max_date.date()}")
 
     while True:
         time.sleep(1)
-        headers = WebDriverWait(driver, 10).until(
-            EC.presence_of_all_elements_located(
-                (By.CLASS_NAME, "ui-datepicker-title"))
-        )
 
-        if len(headers) < 2:
-            print("[ERROR] Could not detect both calendar headers.")
+        # Each month panel is a div.ui-datepicker-group
+        panels = driver.find_elements(By.CSS_SELECTOR, "div.ui-datepicker-group")
+        if len(panels) < 2:
+            print("[ERROR] Could not detect both calendar panels.")
             return False
 
-        left_month = parse_month_year(headers[0].text)
-        right_month = parse_month_year(headers[1].text)
+        # Titles inside each panel
+        left_title_el = panels[0].find_element(By.CLASS_NAME, "ui-datepicker-title")
+        right_title_el = panels[1].find_element(By.CLASS_NAME, "ui-datepicker-title")
 
-        print(
-            f"[INFO] Left month: {headers[0].text} | Right month: {headers[1].text}")
+        left_month = parse_month_year(left_title_el.text)
+        right_month = parse_month_year(right_title_el.text)
 
-        check_dates(driver, left_month)
-        check_dates(driver, right_month)
+        print(f"[INFO] Left month: {left_title_el.text} | Right month: {right_title_el.text}")
 
-        # Stop when the last calendar page exceeds the max date
+        check_dates_in_panel(panels[0], left_month, max_date)
+        check_dates_in_panel(panels[1], right_month, max_date)
+
+        # Stop when the right panel goes beyond max range (after checking it)
         if (right_month.year > MAX_YEAR or
-                (right_month.year == MAX_YEAR and right_month.month >= MAX_MONTH)):
+            (right_month.year == MAX_YEAR and right_month.month > MAX_MONTH)):
             print("[INFO] Reached max calendar range.")
             return True
 
         try:
-            next_button = driver.find_element(
-                By.CLASS_NAME, "ui-datepicker-next")
+            next_button = driver.find_element(By.CLASS_NAME, "ui-datepicker-next")
             next_button.click()
         except:
             print("[ERROR] Could not click 'Next' button.")
             return True
+
+
+def check_dates_in_panel(panel_el, current_month, max_date):
+    """
+    Scan available dates inside a specific calendar panel.
+    """
+    if not current_month:
+        return
+
+    # Only anchors inside THIS panel
+    available_dates = panel_el.find_elements(By.CSS_SELECTOR, "table.ui-datepicker-calendar td a")
+    print(f"[INFO] Checking dates for {current_month.strftime('%B %Y')}, found: {len(available_dates)}")
+
+    year = current_month.year
+    month = current_month.month
+    _, last_day = calendar.monthrange(year, month)
+
+    for elem in available_dates:
+        text = elem.text.strip()
+        if not text:
+            continue
+
+        try:
+            day = int(text)
+        except ValueError:
+            continue
+
+        # Defensive: ignore overflow days
+        if day < 1 or day > last_day:
+            continue
+
+        appointment_date = datetime(year, month, day)
+        print(f"[DEBUG] Found date: {appointment_date}")
+
+        if appointment_date <= max_date:
+            print(f"[ALERT] Appointment available on {appointment_date}!")
+            beep()
+            input("Press Enter to exit...")
+            driver.quit()
+            exit()
 
 
 def check_dates(driver, current_date):
